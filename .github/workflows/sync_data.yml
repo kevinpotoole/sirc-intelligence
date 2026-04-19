@@ -1,0 +1,41 @@
+name: Daily Data Sync
+
+on:
+  schedule:
+    - cron: '0 14 * * *'  # 6:00 AM Vancouver time (UTC-8)
+  workflow_dispatch:       # Also allows manual trigger from GitHub UI
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install pandas requests openpyxl pyarrow
+
+      - name: Run data sync
+        env:
+          GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
+        run: python3 sync_data.py
+
+      - name: Commit and push if data changed
+        run: |
+          git config user.name "SIRC Data Bot"
+          git config user.email "actions@github.com"
+          git add data/combined_data.parquet
+          if git diff --staged --quiet; then
+            echo "No changes to data — skipping commit"
+          else
+            git commit -m "Auto-sync: refresh market data $(date +'%Y-%m-%d')"
+            git push
+          fi
