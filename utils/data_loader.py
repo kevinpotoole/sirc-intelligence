@@ -97,7 +97,7 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
 
     for col in ["list_date", "sold_date"]:
         if col in df.columns:
-            df[col] = pd.to_datetime(df[col], errors="coerce")
+            df[col] = pd.to_datetime(df[col], errors="coerce", format="mixed", dayfirst=False)
 
     if "days_on_market" in df.columns:
         df["days_on_market"] = pd.to_numeric(df["days_on_market"], errors="coerce")
