@@ -177,55 +177,33 @@ def _list_csv_files_with_api_key(folder_id: str, api_key: str) -> list:
 
 # ── Public API ─────────────────────────────────────────────────────────────
 
+PARQUET_PATH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "combined_data.parquet")
+
+
 @st.cache_data(ttl=1800, show_spinner="Loading market data…")
 def load_data() -> pd.DataFrame:
     """
-    Load and return the combined, cleaned DataFrame.
-    Uses Google Drive API key to read publicly shared files.
-    Falls back to local data/ folder if unavailable.
+    Load and return the combined, cleaned DataFrame from the bundled Parquet file.
+    Run sync_data.py to refresh from Google Drive.
     """
-    api_key = _get_api_key()
     frames = []
 
-    if api_key:
-        # Load historical XLSX
-        try:
-            raw = _download_file_with_api_key(XLSX_FILE_ID, api_key)
-            xl = pd.read_excel(io.BytesIO(raw), dtype=str)
-            frames.append(xl)
-        except Exception as e:
-            st.warning(f"Could not load main XLSX: {e}")
+    if os.path.exists(PARQUET_PATH):
+        df = pd.read_parquet(PARQUET_PATH)
+        return _clean(df)
 
-        # Discover and load all CSVs from the CSV files folder
-        try:
-            csv_files = _list_csv_files_with_api_key(CSV_FOLDER_ID, api_key)
-            progress = st.progress(0, text="Loading CSV files…")
-            for i, f in enumerate(csv_files):
-                try:
-                    raw = _download_file_with_api_key(f["id"], api_key)
-                    df = pd.read_csv(io.BytesIO(raw), dtype=str)
-                    frames.append(df)
-                except Exception:
-                    pass
-                progress.progress((i + 1) / max(len(csv_files), 1),
-                                   text=f"Loading file {i+1} of {len(csv_files)}…")
-            progress.empty()
-        except Exception as e:
-            st.warning(f"Could not list CSV files: {e}")
-
-    else:
-        # Fallback: local data/ directory
-        data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
-        if os.path.isdir(data_dir):
-            for fname in os.listdir(data_dir):
-                fpath = os.path.join(data_dir, fname)
-                try:
-                    if fname.endswith(".csv"):
-                        frames.append(pd.read_csv(fpath, dtype=str))
-                    elif fname.endswith((".xlsx", ".xls")):
-                        frames.append(pd.read_excel(fpath, dtype=str))
-                except Exception:
-                    pass
+    # Fallback: local data/ directory (CSV/XLSX)
+    data_dir = os.path.dirname(PARQUET_PATH)
+    if os.path.isdir(data_dir):
+        for fname in os.listdir(data_dir):
+            fpath = os.path.join(data_dir, fname)
+            try:
+                if fname.endswith(".csv"):
+                    frames.append(pd.read_csv(fpath, dtype=str))
+                elif fname.endswith((".xlsx", ".xls")):
+                    frames.append(pd.read_excel(fpath, dtype=str))
+            except Exception:
+                pass
 
     if not frames:
         st.error("No data found. Please configure Google Drive credentials or add files to the data/ folder.")
