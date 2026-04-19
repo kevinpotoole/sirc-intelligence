@@ -1,0 +1,11 @@
+venv/
+__pycache__/
+*.pyc
+.streamlit/secrets.toml
+data/*.csv
+data/*.xlsx
+data/*.parquet
+.DS_Store
+*.egg-info/
+dist/
+build/
