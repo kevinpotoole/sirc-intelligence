@@ -135,21 +135,44 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _gdrive_download_url(file_id: str) -> str:
-    return f"https://drive.google.com/uc?export=download&id={file_id}"
+def _get_api_key() -> str:
+    try:
+        return st.secrets["google_drive"]["api_key"]
+    except Exception:
+        return ""
 
 
-def _download_public_file(file_id: str) -> bytes:
-    url = _gdrive_download_url(file_id)
-    session = requests.Session()
-    response = session.get(url, stream=True, timeout=60)
-    # Handle Google's virus-scan warning for large files
-    for key, value in response.cookies.items():
-        if "download_warning" in key:
-            response = session.get(url, params={"confirm": value}, stream=True, timeout=120)
-            break
+def _download_file_with_api_key(file_id: str, api_key: str) -> bytes:
+    url = f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={api_key}"
+    response = requests.get(url, timeout=180)
     response.raise_for_status()
     return response.content
+
+
+def _list_csv_files_with_api_key(folder_id: str, api_key: str) -> list:
+    files = []
+    page_token = None
+    while True:
+        params = {
+            "q": f"'{folder_id}' in parents and mimeType='text/csv' and trashed=false",
+            "fields": "nextPageToken, files(id, name)",
+            "key": api_key,
+            "pageSize": 100,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        resp = requests.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params=params,
+            timeout=30,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        files.extend(data.get("files", []))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return files
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -158,35 +181,40 @@ def _download_public_file(file_id: str) -> bytes:
 def load_data() -> pd.DataFrame:
     """
     Load and return the combined, cleaned DataFrame.
-    Downloads publicly shared files directly from Google Drive.
-    Falls back to local data/ folder if Drive download fails.
+    Uses Google Drive API key to read publicly shared files.
+    Falls back to local data/ folder if unavailable.
     """
+    api_key = _get_api_key()
     frames = []
-    failed = 0
 
-    # Load historical XLSX
-    try:
-        raw = _download_public_file(XLSX_FILE_ID)
-        xl = pd.read_excel(io.BytesIO(raw), dtype=str)
-        frames.append(xl)
-    except Exception as e:
-        st.warning(f"Could not load main XLSX: {e}")
-        failed += 1
-
-    # Load all known CSVs
-    progress = st.progress(0, text="Loading CSV files…")
-    for i, file_id in enumerate(KNOWN_CSV_IDS):
+    if api_key:
+        # Load historical XLSX
         try:
-            raw = _download_public_file(file_id)
-            df = pd.read_csv(io.BytesIO(raw), dtype=str)
-            frames.append(df)
-        except Exception:
-            failed += 1
-        progress.progress((i + 1) / len(KNOWN_CSV_IDS), text=f"Loading file {i+1} of {len(KNOWN_CSV_IDS)}…")
-    progress.empty()
+            raw = _download_file_with_api_key(XLSX_FILE_ID, api_key)
+            xl = pd.read_excel(io.BytesIO(raw), dtype=str)
+            frames.append(xl)
+        except Exception as e:
+            st.warning(f"Could not load main XLSX: {e}")
 
-    if failed > 0 and not frames:
-        # Final fallback: local data/ directory
+        # Discover and load all CSVs from the CSV files folder
+        try:
+            csv_files = _list_csv_files_with_api_key(CSV_FOLDER_ID, api_key)
+            progress = st.progress(0, text="Loading CSV files…")
+            for i, f in enumerate(csv_files):
+                try:
+                    raw = _download_file_with_api_key(f["id"], api_key)
+                    df = pd.read_csv(io.BytesIO(raw), dtype=str)
+                    frames.append(df)
+                except Exception:
+                    pass
+                progress.progress((i + 1) / max(len(csv_files), 1),
+                                   text=f"Loading file {i+1} of {len(csv_files)}…")
+            progress.empty()
+        except Exception as e:
+            st.warning(f"Could not list CSV files: {e}")
+
+    else:
+        # Fallback: local data/ directory
         data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
         if os.path.isdir(data_dir):
             for fname in os.listdir(data_dir):
