@@ -1,14 +1,58 @@
 import io
 import json
 import os
-import re
 
 import pandas as pd
+import requests
 import streamlit as st
 
 SIRC_KEYWORDS = ["sotheby", "sothebys", "sotheby's"]
 CSV_FOLDER_ID = "1O5QYugSiRdV9GnHzEQCCXXeLsYA7-ivM"
 XLSX_FILE_ID = "17bkeJBE7iqX3z2WN1pXW3FJFlbm9DwjU"
+DIANE_FOLDER_ID = "1vjbD4wSeWVTPznf28F-rqv8ekM_dctJq"
+
+# Known CSV file IDs from the CSV files folder (populated from Drive scan)
+KNOWN_CSV_IDS = [
+    "1Zv9cVEAbXbxDdFKMbLtRn3-B6BXPPHfe",
+    "1Q0qFLBE_HDba6B7GVYjboZCoeGCvGq81",
+    "1FCuYwDadblPT7rna7vWVF6iTK20EZXvb",
+    "10HcQUcvQVYTWW4pRCVFTZMXxJagZ5t-4",
+    "1PeqKmjES86ZemODVu_hu7hX9Ip0vAtcc",
+    "1rn_wVrnp27SX3sLwE2cbN6bNw44315cK",
+    "137ueIKiXqcaZnx3daEqKxt5_sQMgJVRQ",
+    "1RBICmp8q3thLcndrKHyACzCq8DDGYHnZ",
+    "1gzNRZ-s6WgnnVWdIbQfozbDOPe02yoi6",
+    "1upgcERnlZu87bVSjSvpQZBIf-RhjsT8k",
+    "1dRSFMWHj9MT2Rb5DOtoehqCozsgHl-0t",
+    "19tkarjjtUulZ2gGSUEhakt2eQW2WEC3c",
+    "1KX-9ELCibJKMZxxurCKfRYyeJmk7adhN",
+    "1FwA5GVasu_x6bJDj0Z58B1Dzm8zjy8Ky",
+    "17876w-tg93ohEdTuDAcGJTH9CKcFcIqr",
+    "1IoYWX6gm0HODE5Q2virf18OJDPZNWSa_",
+    "1zyxo3nf40ll3gq1PAl6IHiH7G79vnMHE",
+    "1cuhICE-K5XBJINuyOr_HS2XkwfqqFCkh",
+    "1EMi3qhCTxHZVgzud9B_Uj7Ekq-fUDBHs",
+    "1lVn5HcoUoUVgwC0anjF_bYPfOTkk49hK",
+    "16-Bal3YHJUY6RQFvC8STZhKffJLeL1S-",
+    "1MJ2ckIiQ1EVg7Ko7zjXtGgT7iws-KRDt",
+    "18otFbYGDP-80_1xPQ9du9IrSqxwUBavF",
+    "1HO5UZJuN09-7a5wwAR7XwjFVewjh2_o4",
+    "1DYf7rwMRNX_XO34vyRoWb0hS07KuQIwX",
+    "12vqLJnLY70TrgDxdCbsTQrs8uhmFMXu2",
+    "12SYljL4xMP-Ue3x8AyW-vKBT36LGjB86",
+    "1T1EuBqOG4AkNMbvIwEJi9Xqf_iIS6qiY",
+    "1lWfPWYQ3gmQS0dh2QwM3H0eOTBoJgr4x",
+    "1X1HhZUFa3vXHJrzSDXJPAR4JyWIoQ6uL",
+    # Root-level CSVs
+    "1PZftBll40yy5ZpiHMlu9Hvn6BMkiHE7Q",
+    "1dloeKPMMJiRNwqVaHSCeHzTjRdDM3rpu",
+    "1E4xeNK2kUlfOJ7nUuXgXbBFwOJG6BIUl",
+    "12YvK0W3m09vKL2uRjLcPE0OZZhXkNMLF",
+    "1yUlF0mrraVnhFSIMz0Iulretrbe6LRZy",
+    "1Ic_YCxq4sKILI8HBCYUnwuJD9OMD5iga",
+    "1ycQYygXoHi9SSu_-cYRfi5J1CdXcrGW_",
+    "1S3G2Y_Lyh44oV8FlyyvhG_YliFK3akoB",
+]
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
@@ -91,49 +135,21 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def _build_drive_service():
-    try:
-        from google.oauth2 import service_account
-        from googleapiclient.discovery import build
-
-        creds_raw = st.secrets["google_drive"]["credentials"]
-        creds_dict = json.loads(creds_raw)
-        creds = service_account.Credentials.from_service_account_info(
-            creds_dict,
-            scopes=["https://www.googleapis.com/auth/drive.readonly"],
-        )
-        return build("drive", "v3", credentials=creds, cache_discovery=False)
-    except Exception:
-        return None
+def _gdrive_download_url(file_id: str) -> str:
+    return f"https://drive.google.com/uc?export=download&id={file_id}"
 
 
-def _download_file_bytes(service, file_id: str) -> bytes:
-    from googleapiclient.http import MediaIoBaseDownload
-
-    request = service.files().get_media(fileId=file_id)
-    buf = io.BytesIO()
-    dl = MediaIoBaseDownload(buf, request)
-    done = False
-    while not done:
-        _, done = dl.next_chunk()
-    buf.seek(0)
-    return buf.read()
-
-
-def _list_csv_files(service, folder_id: str) -> list[dict]:
-    results = []
-    page_token = None
-    while True:
-        resp = service.files().list(
-            q=f"'{folder_id}' in parents and mimeType='text/csv' and trashed=false",
-            fields="nextPageToken, files(id, name, modifiedTime)",
-            pageToken=page_token,
-        ).execute()
-        results.extend(resp.get("files", []))
-        page_token = resp.get("nextPageToken")
-        if not page_token:
+def _download_public_file(file_id: str) -> bytes:
+    url = _gdrive_download_url(file_id)
+    session = requests.Session()
+    response = session.get(url, stream=True, timeout=60)
+    # Handle Google's virus-scan warning for large files
+    for key, value in response.cookies.items():
+        if "download_warning" in key:
+            response = session.get(url, params={"confirm": value}, stream=True, timeout=120)
             break
-    return results
+    response.raise_for_status()
+    return response.content
 
 
 # ── Public API ─────────────────────────────────────────────────────────────
@@ -142,36 +158,35 @@ def _list_csv_files(service, folder_id: str) -> list[dict]:
 def load_data() -> pd.DataFrame:
     """
     Load and return the combined, cleaned DataFrame.
-    Tries Google Drive first; falls back to local data/ folder.
+    Downloads publicly shared files directly from Google Drive.
+    Falls back to local data/ folder if Drive download fails.
     """
-    service = _build_drive_service()
     frames = []
+    failed = 0
 
-    if service:
-        # Load historical XLSX
+    # Load historical XLSX
+    try:
+        raw = _download_public_file(XLSX_FILE_ID)
+        xl = pd.read_excel(io.BytesIO(raw), dtype=str)
+        frames.append(xl)
+    except Exception as e:
+        st.warning(f"Could not load main XLSX: {e}")
+        failed += 1
+
+    # Load all known CSVs
+    progress = st.progress(0, text="Loading CSV files…")
+    for i, file_id in enumerate(KNOWN_CSV_IDS):
         try:
-            raw = _download_file_bytes(service, XLSX_FILE_ID)
-            xl = pd.read_excel(io.BytesIO(raw), dtype=str)
-            frames.append(xl)
-        except Exception as e:
-            st.warning(f"Could not load XLSX from Drive: {e}")
+            raw = _download_public_file(file_id)
+            df = pd.read_csv(io.BytesIO(raw), dtype=str)
+            frames.append(df)
+        except Exception:
+            failed += 1
+        progress.progress((i + 1) / len(KNOWN_CSV_IDS), text=f"Loading file {i+1} of {len(KNOWN_CSV_IDS)}…")
+    progress.empty()
 
-        # Load all CSVs from the folder
-        try:
-            csv_folder = st.secrets["google_drive"].get("csv_folder_id", CSV_FOLDER_ID)
-            files = _list_csv_files(service, csv_folder)
-            for f in files:
-                try:
-                    raw = _download_file_bytes(service, f["id"])
-                    df = pd.read_csv(io.BytesIO(raw), dtype=str)
-                    frames.append(df)
-                except Exception:
-                    pass
-        except Exception as e:
-            st.warning(f"Could not load CSVs from Drive: {e}")
-
-    else:
-        # Fallback: local data/ directory
+    if failed > 0 and not frames:
+        # Final fallback: local data/ directory
         data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
         if os.path.isdir(data_dir):
             for fname in os.listdir(data_dir):
