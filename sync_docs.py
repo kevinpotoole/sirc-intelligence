@@ -109,6 +109,11 @@ CREA_SKIP_PATTERNS = [
     "/national-price-map/", "/podcast-guest-application/",
 ]
 
+# PDFs to always fetch directly (not relying on crawl discovery)
+CREA_DIRECT_PDFS = [
+    ("CREA: REALTOR® Code (Full)", "https://www.crea.ca/files/REALTOR-Code-Eng.pdf"),
+]
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def chunk_text(text: str, source: str, url: str = "") -> list[dict]:
@@ -378,6 +383,24 @@ def crawl_crea() -> list[dict]:
 
         except Exception as e:
             print(f"  ✗ parse error {url}: {e}")
+
+    # Always fetch these PDFs directly (guaranteed inclusion)
+    for title, pdf_url in CREA_DIRECT_PDFS:
+        if pdf_url in visited:
+            continue
+        visited.add(pdf_url)
+        time.sleep(0.5)
+        r = _fetch_url(pdf_url, timeout=30)
+        if r is None or r.status_code != 200:
+            print(f"  ✗ direct PDF failed ({getattr(r,'status_code','?')}): {pdf_url}")
+            continue
+        try:
+            text = extract_pdf_text(r.content)
+            doc_chunks = chunk_text(text, title, url=pdf_url)
+            chunks.extend(doc_chunks)
+            print(f"  ✓ {title}: {len(doc_chunks)} chunks")
+        except Exception as e:
+            print(f"  ✗ PDF parse error {pdf_url}: {e}")
 
     # Download discovered PDFs
     print(f"  Discovered {len(pdf_urls)} CREA PDF links")
