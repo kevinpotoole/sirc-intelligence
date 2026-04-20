@@ -205,30 +205,14 @@ def apply_plotly_theme(fig, title=None):
 
 
 def _logo_b64() -> str:
-    """Download the SIRC white logo from Drive and return as base64. Cached per session."""
-    import base64
-    import streamlit as st
-    import requests
-
-    LOGO_FILE_ID = "1Tb3_8VL4BbdH_CGbj79oUb05GctoAxy6"
-
-    @st.cache_data(show_spinner=False, ttl=86400)
-    def _fetch(file_id: str, api_key: str) -> str:
-        r = requests.get(
-            f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={api_key}",
-            timeout=15,
-        )
-        if r.status_code == 200:
-            return base64.b64encode(r.content).decode()
-        return ""
-
+    """Read the bundled SIRC white logo and return as base64."""
+    import base64, os
+    logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "sirc_logo.png")
     try:
-        api_key = st.secrets.get("google_drive", {}).get("api_key", "")
-        if api_key:
-            return _fetch(LOGO_FILE_ID, api_key)
-    except Exception:
-        pass
-    return ""
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except OSError:
+        return ""
 
 
 def header(page_title: str, subtitle: str = ""):
