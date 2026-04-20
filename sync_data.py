@@ -66,7 +66,7 @@ except Exception as e:
     print(f"  ✗ Failed: {e}")
 
 print("Listing CSV files from Drive...")
-csv_files = list_csvs(CSV_FOLDER_ID)
+csv_files = sorted(list_csvs(CSV_FOLDER_ID), key=lambda f: f["name"])
 print(f"  Found {len(csv_files)} files")
 
 for i, f in enumerate(csv_files):
