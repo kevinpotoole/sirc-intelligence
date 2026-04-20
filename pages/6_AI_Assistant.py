@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import re
 from collections import Counter
@@ -16,7 +17,7 @@ KNOWLEDGE_BASE_PATH = os.path.join(
 
 # Minimum BM25 score to consider a chunk relevant. Below this threshold we
 # tell the user the topic isn't covered rather than risk a hallucinated answer.
-MIN_RELEVANCE_SCORE = 0.5
+MIN_RELEVANCE_SCORE = 3.0
 
 SYSTEM_PROMPT = """You are an expert AI assistant for a Managing Broker at Sotheby's International Realty Canada (SIRC).
 
@@ -52,27 +53,37 @@ def tokenize(text: str) -> list:
     return re.findall(r'\b[a-z]{2,}\b', text.lower())
 
 
-def bm25_score(query_tokens: list, chunk_text: str, avg_dl: float, k1=1.5, b=0.75) -> float:
-    doc_tokens = tokenize(chunk_text)
-    dl = len(doc_tokens)
-    tf = Counter(doc_tokens)
-    score = 0.0
-    for token in set(query_tokens):
-        if token in tf:
-            f = tf[token]
-            score += (f * (k1 + 1)) / (f + k1 * (1 - b + b * dl / avg_dl))
-    return score
-
-
 def find_relevant_chunks(query: str, chunks: list, top_k: int = 8):
     if not chunks:
         return [], 0.0
     query_tokens = tokenize(query)
-    avg_dl = sum(len(tokenize(c["text"])) for c in chunks) / len(chunks)
-    scored = [(bm25_score(query_tokens, c["text"], avg_dl), c) for c in chunks]
-    scored.sort(key=lambda x: x[0], reverse=True)
-    top_score = scored[0][0] if scored else 0.0
-    relevant = [c for score, c in scored[:top_k] if score > 0]
+    N = len(chunks)
+    doc_tokens = [tokenize(c["text"]) for c in chunks]
+    avg_dl = sum(len(d) for d in doc_tokens) / N
+
+    # Document frequency for IDF
+    df: Counter = Counter()
+    for d in doc_tokens:
+        for t in set(d):
+            df[t] += 1
+
+    k1, b = 1.5, 0.75
+    scores = []
+    for i, d in enumerate(doc_tokens):
+        dl = len(d)
+        tf = Counter(d)
+        score = 0.0
+        for token in set(query_tokens):
+            f = tf.get(token, 0)
+            if f == 0:
+                continue
+            idf = math.log((N - df[token] + 0.5) / (df[token] + 0.5) + 1)
+            score += idf * (f * (k1 + 1)) / (f + k1 * (1 - b + b * dl / avg_dl))
+        scores.append((score, i))
+
+    scores.sort(reverse=True)
+    top_score = scores[0][0] if scores else 0.0
+    relevant = [chunks[i] for s, i in scores[:top_k] if s > 0]
     return relevant, top_score
 
 
