@@ -37,19 +37,13 @@ HEADERS = {
 }
 CHUNK_SIZE = 400  # words per chunk
 
-# ── Google Drive documents ──────────────────────────────────────────────────
-DRIVE_DOCS = [
-    ("GVR Constitution & Bylaws (March 2023)",              "1WyfaSfaAHxoccwbr41NME2wT9mh445_v", "pdf"),
-    ("From Conversation to Commission (GVR)",               "1WjzAs2AJB5c5C3OGrlowJQr5-zEx-sXv", "pdf"),
-    ("Competition Act - Real Estate Guide (CREA)",          "1I1i_-JquI8vqV3CC8DAGlPdxdv0Nk6Gw", "pdf"),
-    ("What is Misconduct (GVR)",                            "1OVh0PjptPi8M6qnbDNrEb4r3XOi1EQqI", "pdf"),
-    ("REALTOR Code of Ethics (April 2023)",                 "1duR-06DrE1r_TmG79zEJmT32Yuu6z4ap", "pdf"),
-    ("SIRC Brand Standards 2026",                           "1sIV4gScPBo2eeZA6AQe_yz92ZSesC6xk", "pdf"),
-    ("FINTRAC Compliance Manual (SIRC)",                    "1GCvObiTan141WtTDbcV4U4LoXvSpqYBP", "pdf"),
-    ("Wire Transfer Instructions 2025 (SIRC)",              "1LrZrd_xGe1c4OWhsWxdvRzmOSwbRBuxy", "pdf"),
-    ("BCFSA Regulation 209-2021",                           "1EailEUPqVSdH5vnaocvevuFwf36SHEIA", "pdf"),
-    ("BCFSA Real Estate Services Act Regulation 506-2004",  "1M0uv8Fj94WZ3kO2pW5j5fQyrbCUlOEv7", "pdf"),
-]
+# ── Google Drive — Diane folder ─────────────────────────────────────────────
+# All PDFs in this folder (and sub-folders) are automatically indexed.
+# To add a new source, just drop a PDF into this folder on Drive.
+DIANE_FOLDER_ID = "1vjbD4wSeWVTPznf28F-rqv8ekM_dctJq"
+
+# Skip files larger than this — avoids timeouts on huge design/image PDFs
+MAX_PDF_BYTES = 20 * 1024 * 1024  # 20 MB
 
 # ── BCFSA website sections to crawl ────────────────────────────────────────
 BCFSA_BASE = "https://www.bcfsa.ca"
@@ -181,24 +175,81 @@ def is_relevant_crea_url(url: str) -> bool:
 
 # ── Google Drive section ────────────────────────────────────────────────────
 
-def process_drive_docs() -> list[dict]:
+DRIVE_FILES_API = "https://www.googleapis.com/drive/v3/files"
+
+
+def _list_folder_pdfs(folder_id: str, api_key: str) -> list[dict]:
+    """Return list of {id, name, size} for all PDFs in folder tree."""
+    pdfs = []
+    folders_to_scan = [folder_id]
+    visited_folders = set()
+
+    while folders_to_scan:
+        fid = folders_to_scan.pop(0)
+        if fid in visited_folders:
+            continue
+        visited_folders.add(fid)
+
+        page_token = None
+        while True:
+            params = {
+                "q": f"'{fid}' in parents",
+                "fields": "nextPageToken, files(id, name, mimeType, size)",
+                "pageSize": 100,
+                "key": api_key,
+            }
+            if page_token:
+                params["pageToken"] = page_token
+            try:
+                r = requests.get(DRIVE_FILES_API, params=params, timeout=15)
+                r.raise_for_status()
+                data = r.json()
+            except Exception as e:
+                print(f"  ✗ Drive list error for folder {fid}: {e}")
+                break
+
+            for f in data.get("files", []):
+                mime = f.get("mimeType", "")
+                if mime == "application/vnd.google-apps.folder":
+                    folders_to_scan.append(f["id"])
+                elif mime == "application/pdf":
+                    size = int(f.get("size", 0))
+                    if size <= MAX_PDF_BYTES:
+                        pdfs.append({"id": f["id"], "name": f["name"], "size": size})
+                    else:
+                        print(f"  – skipping large PDF ({size/1e6:.0f}MB): {f['name']}")
+
+            page_token = data.get("nextPageToken")
+            if not page_token:
+                break
+
+    return pdfs
+
+
+def process_diane_folder() -> list[dict]:
     chunks = []
     if not API_KEY:
         print("  Skipping Drive docs (no API key)")
         return chunks
 
-    for title, file_id, ftype in DRIVE_DOCS:
+    pdfs = _list_folder_pdfs(DIANE_FOLDER_ID, API_KEY)
+    print(f"  Found {len(pdfs)} PDFs in Diane folder")
+
+    for pdf in pdfs:
+        title = pdf["name"].replace(".pdf", "").replace("_", " ").strip()
         try:
-            raw = download_drive_file(file_id)
-            if ftype == "pdf":
-                text = extract_pdf_text(raw)
-            else:
-                text = raw.decode("utf-8", errors="replace")
+            raw = download_drive_file(pdf["id"])
+            text = extract_pdf_text(raw)
+            word_count = len(text.split())
+            if word_count < 30:
+                print(f"  – too little text ({word_count} words): {title[:60]}")
+                continue
             doc_chunks = chunk_text(text, title, url="")
             chunks.extend(doc_chunks)
-            print(f"  ✓ {title}: {len(doc_chunks)} chunks")
+            print(f"  ✓ {title[:65]}: {len(doc_chunks)} chunks ({word_count} words)")
         except Exception as e:
-            print(f"  ✗ {title}: {e}")
+            print(f"  ✗ {title[:60]}: {e}")
+
     return chunks
 
 
@@ -434,7 +485,7 @@ if __name__ == "__main__":
     all_chunks = []
 
     print("\n[1/3] Processing Google Drive regulatory documents...")
-    drive_chunks = process_drive_docs()
+    drive_chunks = process_diane_folder()
     all_chunks.extend(drive_chunks)
     print(f"      {len(drive_chunks)} chunks from Drive documents")
 
