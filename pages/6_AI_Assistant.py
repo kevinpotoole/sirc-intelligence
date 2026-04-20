@@ -1,5 +1,4 @@
 import json
-import math
 import os
 import re
 from collections import Counter
@@ -15,9 +14,15 @@ KNOWLEDGE_BASE_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "docs", "knowledge_base.json"
 )
 
+# Minimum BM25 score to consider a chunk relevant. Below this threshold we
+# tell the user the topic isn't covered rather than risk a hallucinated answer.
+MIN_RELEVANCE_SCORE = 0.5
+
 SYSTEM_PROMPT = """You are an expert AI assistant for a Managing Broker at Sotheby's International Realty Canada (SIRC).
 
-You have deep knowledge of:
+STRICT GROUNDING RULE: You must answer ONLY using information explicitly present in the document excerpts provided in the user's message. Do NOT draw on any general knowledge, training data, or external sources. If the answer is not in the provided excerpts, say clearly: "I cannot find a reliable answer to this question in my current knowledge base." Then, if you know of one or two specific reputable sources that would cover it (e.g., a BCFSA guideline, FINTRAC bulletin, or CREA policy document), name them by title and suggest the user consider adding them — but do not state what those sources say.
+
+You have deep knowledge of (from loaded documents):
 - BC real estate regulations and the Real Estate Services Act (BCFSA)
 - FINTRAC compliance requirements for real estate
 - GVR (Greater Vancouver REALTORS) rules, bylaws and code of conduct
@@ -26,16 +31,13 @@ You have deep knowledge of:
 - SIRC brand standards and internal policies
 - Professional standards and misconduct guidelines
 
-Your role is to assist the Managing Broker with:
-- Answering regulatory and compliance questions
-- Explaining policies and procedures
-- Providing guidance on agent conduct issues
-- Advising on FINTRAC obligations
-- Clarifying brand standards and usage
+When answering from the provided excerpts:
+- Cite the exact document and section you are drawing from
+- Use direct quotes where helpful
+- If excerpts give partial information, say what is covered and what is not
+- Never infer, extrapolate, or fill gaps with general knowledge
 
-Always be clear, professional, and precise. When answering, cite the specific document and section where the information comes from. If you are unsure or the information is not in the provided documents, say so clearly and recommend consulting a lawyer or the relevant regulatory body.
-
-IMPORTANT: You are providing information and guidance, not legal advice. Always note when a question requires formal legal or regulatory consultation."""
+Always note: you provide information and guidance only — not legal advice. Recommend formal consultation for legal or regulatory matters."""
 
 
 @st.cache_data(show_spinner=False)
@@ -46,7 +48,7 @@ def load_knowledge_base():
         return json.load(f)
 
 
-def tokenize(text: str) -> list[str]:
+def tokenize(text: str) -> list:
     return re.findall(r'\b[a-z]{2,}\b', text.lower())
 
 
@@ -62,17 +64,19 @@ def bm25_score(query_tokens: list, chunk_text: str, avg_dl: float, k1=1.5, b=0.7
     return score
 
 
-def find_relevant_chunks(query: str, chunks: list, top_k: int = 8) -> list:
+def find_relevant_chunks(query: str, chunks: list, top_k: int = 8):
     if not chunks:
-        return []
+        return [], 0.0
     query_tokens = tokenize(query)
     avg_dl = sum(len(tokenize(c["text"])) for c in chunks) / len(chunks)
     scored = [(bm25_score(query_tokens, c["text"], avg_dl), c) for c in chunks]
     scored.sort(key=lambda x: x[0], reverse=True)
-    return [c for _, c in scored[:top_k] if _ > 0]
+    top_score = scored[0][0] if scored else 0.0
+    relevant = [c for score, c in scored[:top_k] if score > 0]
+    return relevant, top_score
 
 
-def ask_claude(question: str, context_chunks: list, api_key: str, history: list) -> str:
+def ask_claude(question: str, context_chunks: list, api_key: str) -> str:
     import anthropic
     client = anthropic.Anthropic(api_key=api_key)
 
@@ -80,21 +84,17 @@ def ask_claude(question: str, context_chunks: list, api_key: str, history: list)
         f"[Source: {c['source']}]\n{c['text']}" for c in context_chunks
     )
 
-    messages = []
-    for msg in history[-6:]:  # Keep last 6 turns for context
-        messages.append({"role": msg["role"], "content": msg["content"]})
-
-    messages.append({
+    messages = [{
         "role": "user",
-        "content": f"""Based on the following regulatory documents, please answer this question:
+        "content": f"""Answer the following question using ONLY the document excerpts below. Do not use any knowledge outside these excerpts.
 
 QUESTION: {question}
 
-RELEVANT DOCUMENT EXCERPTS:
+DOCUMENT EXCERPTS:
 {context}
 
-Please provide a clear, practical answer and cite which document(s) you're drawing from."""
-    })
+Cite the specific document(s) you draw from. If the answer is not in these excerpts, say so and suggest which reputable source might cover it."""
+    }]
 
     response = client.messages.create(
         model="claude-sonnet-4-6",
@@ -114,18 +114,31 @@ except Exception:
 # ── Load knowledge base ────────────────────────────────────────────────────
 chunks = load_knowledge_base()
 sources = sorted(set(c["source"] for c in chunks)) if chunks else []
+bcfsa_count = sum(1 for s in sources if s.startswith("BCFSA"))
+drive_count = len(sources) - bcfsa_count
 
 # ── Sidebar ────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(SIRC_CSS, unsafe_allow_html=True)
     st.markdown("### Knowledge Base")
-    st.markdown(f"<small style='color:#C9A96E'>{len(chunks)} document sections loaded</small>", unsafe_allow_html=True)
-    st.markdown("**Documents:**")
-    for src in sources:
-        st.markdown(f"<small>• {src}</small>", unsafe_allow_html=True)
+    st.markdown(
+        f"<small style='color:#C9A96E'>{len(chunks)} sections · {len(sources)} sources</small>",
+        unsafe_allow_html=True,
+    )
+    st.markdown(f"<small>• {drive_count} regulatory documents (Drive)</small>", unsafe_allow_html=True)
+    st.markdown(f"<small>• {bcfsa_count} BCFSA website pages</small>", unsafe_allow_html=True)
+    with st.expander("View all sources"):
+        for src in sources:
+            st.markdown(f"<small>· {src}</small>", unsafe_allow_html=True)
     st.markdown("---")
-    if st.button("🗑️  Clear Conversation"):
-        st.session_state.messages = []
+    st.markdown(
+        "<small style='color:#8B7355'>The assistant answers only from these sources. "
+        "If a topic isn't covered, it will say so and suggest sources to add.</small>",
+        unsafe_allow_html=True,
+    )
+    st.markdown("---")
+    if st.button("🗑️  Clear Answer"):
+        st.session_state.current_qa = None
         st.rerun()
 
 # ── API key warning ────────────────────────────────────────────────────────
@@ -148,7 +161,7 @@ if not chunks:
     st.error("Knowledge base not found. Please run `sync_docs.py` to build it.")
     st.stop()
 
-# ── Chat interface ─────────────────────────────────────────────────────────
+# ── Intro banner ────────────────────────────────────────────────────────────
 st.markdown(f"""
 <div style="background:{SIRC_NAVY};padding:1rem 1.5rem;border-radius:4px;margin-bottom:1.5rem">
 <p style="color:#C9A96E;font-size:0.75rem;letter-spacing:0.1em;text-transform:uppercase;margin:0 0 0.3rem 0">
@@ -157,11 +170,12 @@ Your AI Managing Broker Assistant
 <p style="color:#F7F3EE;font-size:0.85rem;margin:0">
 Ask me anything about BC real estate regulations, FINTRAC compliance, GVR bylaws, REALTOR Code,
 BCFSA rules, SIRC brand standards, agent conduct, or any policy question you face as a Managing Broker.
+Each answer is drawn only from the loaded knowledge base — no guessing.
 </p>
 </div>
 """, unsafe_allow_html=True)
 
-# Suggested questions
+# ── Suggested questions ─────────────────────────────────────────────────────
 section("Suggested Questions")
 suggestions = [
     "What are my FINTRAC obligations when onboarding a new client?",
@@ -174,42 +188,35 @@ suggestions = [
 cols = st.columns(3)
 for i, suggestion in enumerate(suggestions):
     if cols[i % 3].button(suggestion, key=f"suggest_{i}"):
-        st.session_state.setdefault("messages", [])
         st.session_state["pending_question"] = suggestion
 
-# ── Message history ────────────────────────────────────────────────────────
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-
-section("Conversation")
-
-for msg in st.session_state.messages:
-    with st.chat_message(msg["role"], avatar="🏛️" if msg["role"] == "assistant" else "👤"):
-        st.markdown(msg["content"])
-        if msg.get("sources"):
-            with st.expander("📄 Sources consulted"):
-                for src in msg["sources"]:
-                    st.markdown(f"- {src}")
-
-# Handle suggested question click
+# ── Chat input ──────────────────────────────────────────────────────────────
+section("Ask a Question")
 pending = st.session_state.pop("pending_question", None)
-
-# Chat input
 user_input = st.chat_input("Ask a regulatory or compliance question…") or pending
 
 if user_input:
-    st.session_state.messages.append({"role": "user", "content": user_input})
+    # Show the question
     with st.chat_message("user", avatar="👤"):
         st.markdown(user_input)
 
     with st.chat_message("assistant", avatar="🏛️"):
         with st.spinner("Searching documents and preparing answer…"):
-            relevant = find_relevant_chunks(user_input, chunks, top_k=8)
+            relevant, top_score = find_relevant_chunks(user_input, chunks, top_k=8)
             used_sources = sorted(set(c["source"] for c in relevant))
-            try:
-                answer = ask_claude(user_input, relevant, anthropic_key, st.session_state.messages[:-1])
-            except Exception as e:
-                answer = f"Sorry, I encountered an error: {e}. Please check your Anthropic API key in Streamlit secrets."
+
+            if top_score < MIN_RELEVANCE_SCORE or not relevant:
+                answer = (
+                    "I was unable to find relevant information in my current knowledge base to answer this question reliably.\n\n"
+                    "To avoid giving you inaccurate information, I will not speculate. Please consult the relevant regulatory body directly, "
+                    "or let me know if you'd like me to suggest a specific document or source that should be added to the knowledge base."
+                )
+                used_sources = []
+            else:
+                try:
+                    answer = ask_claude(user_input, relevant, anthropic_key)
+                except Exception as e:
+                    answer = f"Sorry, I encountered an error: {e}. Please check your Anthropic API key in Streamlit secrets."
 
         st.markdown(answer)
         if used_sources:
@@ -217,11 +224,24 @@ if user_input:
                 for src in used_sources:
                     st.markdown(f"- {src}")
 
-    st.session_state.messages.append({
-        "role": "assistant",
-        "content": answer,
+    # Store only the most recent Q&A (replaces previous)
+    st.session_state["current_qa"] = {
+        "question": user_input,
+        "answer": answer,
         "sources": used_sources,
-    })
+    }
+
+elif "current_qa" in st.session_state and st.session_state["current_qa"]:
+    # Re-display the last answer (without re-running Claude)
+    qa = st.session_state["current_qa"]
+    with st.chat_message("user", avatar="👤"):
+        st.markdown(qa["question"])
+    with st.chat_message("assistant", avatar="🏛️"):
+        st.markdown(qa["answer"])
+        if qa.get("sources"):
+            with st.expander("📄 Sources consulted"):
+                for src in qa["sources"]:
+                    st.markdown(f"- {src}")
 
 # ── Footer ─────────────────────────────────────────────────────────────────
 st.markdown("---")
