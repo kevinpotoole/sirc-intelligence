@@ -10,11 +10,11 @@ Reads the Managing Broker monthly XLSX from Google Drive and displays:
 """
 import io
 import os
-import base64
 
 import pandas as pd
 import plotly.graph_objects as go
 import plotly.express as px
+import requests
 import streamlit as st
 
 from utils.mb_report_loader import load_mb_report
@@ -29,8 +29,55 @@ header("Internal Reporting", "Managing Broker Dashboard — Vancouver & West Van
 MB_REPORT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "mb_report.xlsx"
 )
+# Google Drive folder ID for Internal Company Reporting
+INTERNAL_FOLDER_ID = "19Zh42MU7WHSjglsapRjr7SXcofArqn84"
 
-# ── Load report ────────────────────────────────────────────────────────────
+
+def _get_api_key():
+    try:
+        return st.secrets["google_drive"]["api_key"]
+    except Exception:
+        return ""
+
+
+@st.cache_data(show_spinner="Checking Drive for latest report…", ttl=3600)
+def fetch_latest_from_drive(folder_id: str, api_key: str):
+    """
+    Search the Internal Company Reporting folder for the most recently
+    modified XLSX and download it. Returns raw bytes or None on failure.
+    """
+    if not api_key:
+        return None, None
+    try:
+        params = {
+            "q": (
+                f"'{folder_id}' in parents"
+                " and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
+                " and trashed=false"
+            ),
+            "fields": "files(id,name,modifiedTime)",
+            "orderBy": "modifiedTime desc",
+            "pageSize": 10,
+            "key": api_key,
+        }
+        r = requests.get(
+            "https://www.googleapis.com/drive/v3/files",
+            params=params, timeout=20,
+        )
+        r.raise_for_status()
+        files = r.json().get("files", [])
+        if not files:
+            return None, None
+        latest = files[0]
+        dl = requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{latest['id']}?alt=media&key={api_key}",
+            timeout=120,
+        )
+        dl.raise_for_status()
+        return dl.content, latest["name"]
+    except Exception as e:
+        return None, str(e)
+
 
 @st.cache_data(show_spinner="Loading Managing Broker report…", ttl=1800)
 def get_report(path):
@@ -57,29 +104,50 @@ def _delta_color(val):
     return "#2E7D32" if val > 0 else "#C62828"
 
 
-# ── Sidebar: file upload or Drive download ─────────────────────────────────
+# ── Sidebar ─────────────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown(SIRC_CSS, unsafe_allow_html=True)
     st.markdown("### Report Source")
 
-    uploaded = st.file_uploader(
-        "Upload Managing Broker XLSX",
-        type=["xlsx"],
-        help="Upload the monthly Managing Broker Report XLSX",
-    )
-    if uploaded:
-        report_bytes = uploaded.read()
+    api_key = _get_api_key()
+
+    # Auto-fetch from Drive
+    drive_bytes, drive_info = fetch_latest_from_drive(INTERNAL_FOLDER_ID, api_key)
+    if drive_bytes:
+        os.makedirs(os.path.dirname(MB_REPORT_PATH), exist_ok=True)
         with open(MB_REPORT_PATH, "wb") as f:
-            f.write(report_bytes)
-        st.cache_data.clear()
-        st.success("Report uploaded and cached.")
+            f.write(drive_bytes)
+        st.markdown(
+            f"<small style='color:#C9A96E'>✓ Auto-loaded from Drive: {drive_info}</small>",
+            unsafe_allow_html=True,
+        )
+    elif not os.path.exists(MB_REPORT_PATH):
+        if drive_info:
+            st.warning(f"Drive fetch failed: {drive_info}")
+        else:
+            st.warning("Google Drive API key not configured.")
+
+    # Manual upload fallback
+    with st.expander("Upload manually (override)"):
+        uploaded = st.file_uploader(
+            "Upload Managing Broker XLSX",
+            type=["xlsx"],
+            help="Overrides the auto-fetched file",
+        )
+        if uploaded:
+            report_bytes = uploaded.read()
+            with open(MB_REPORT_PATH, "wb") as f:
+                f.write(report_bytes)
+            st.cache_data.clear()
+            st.success("Uploaded and cached.")
 
     if os.path.exists(MB_REPORT_PATH):
         mtime = os.path.getmtime(MB_REPORT_PATH)
         mdate = pd.Timestamp(mtime, unit="s").strftime("%b %d, %Y %H:%M")
-        st.markdown(f"<small style='color:#C9A96E'>Loaded: {mdate}</small>", unsafe_allow_html=True)
-    else:
-        st.warning("No report found. Upload the XLSX above.")
+        st.markdown(
+            f"<small style='color:#C9A96E'>File date: {mdate}</small>",
+            unsafe_allow_html=True,
+        )
 
 if not os.path.exists(MB_REPORT_PATH):
     st.info("Upload the Managing Broker XLSX using the sidebar to get started.")

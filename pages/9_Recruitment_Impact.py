@@ -22,6 +22,55 @@ header("Recruitment Impact Analyser", "Project the P&L effect of recruiting a ta
 MB_REPORT_PATH = os.path.join(
     os.path.dirname(os.path.dirname(__file__)), "data", "mb_report.xlsx"
 )
+INTERNAL_FOLDER_ID = "19Zh42MU7WHSjglsapRjr7SXcofArqn84"
+
+
+def _get_api_key():
+    try:
+        return st.secrets["google_drive"]["api_key"]
+    except Exception:
+        return ""
+
+
+@st.cache_data(show_spinner=False, ttl=3600)
+def _fetch_mb_from_drive(folder_id, api_key):
+    if not api_key:
+        return None
+    try:
+        import requests as _req
+        params = {
+            "q": (
+                f"'{folder_id}' in parents"
+                " and mimeType='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'"
+                " and trashed=false"
+            ),
+            "fields": "files(id,modifiedTime)",
+            "orderBy": "modifiedTime desc",
+            "pageSize": 5,
+            "key": api_key,
+        }
+        r = _req.get("https://www.googleapis.com/drive/v3/files", params=params, timeout=20)
+        r.raise_for_status()
+        files = r.json().get("files", [])
+        if not files:
+            return None
+        dl = _req.get(
+            f"https://www.googleapis.com/drive/v3/files/{files[0]['id']}?alt=media&key={api_key}",
+            timeout=120,
+        )
+        dl.raise_for_status()
+        return dl.content
+    except Exception:
+        return None
+
+
+# Auto-fetch MB report from Drive if not already present
+if not os.path.exists(MB_REPORT_PATH):
+    _raw = _fetch_mb_from_drive(INTERNAL_FOLDER_ID, _get_api_key())
+    if _raw:
+        os.makedirs(os.path.dirname(MB_REPORT_PATH), exist_ok=True)
+        with open(MB_REPORT_PATH, "wb") as _f:
+            _f.write(_raw)
 
 # ── Load market data ────────────────────────────────────────────────────────
 df = load_data()
