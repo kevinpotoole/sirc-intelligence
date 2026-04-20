@@ -21,21 +21,26 @@ jobs:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install pandas requests openpyxl pyarrow
+        run: pip install pandas requests openpyxl pyarrow pypdf beautifulsoup4 lxml
 
-      - name: Run data sync
+      - name: Sync market data (MLS transactions)
         env:
           GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
         run: python3 sync_data.py
 
-      - name: Commit and push if data changed
+      - name: Sync knowledge base (Drive docs + BCFSA website)
+        env:
+          GDRIVE_API_KEY: ${{ secrets.GDRIVE_API_KEY }}
+        run: python3 sync_docs.py
+
+      - name: Commit and push if anything changed
         run: |
           git config user.name "SIRC Data Bot"
           git config user.email "actions@github.com"
-          git add data/combined_data.parquet
+          git add data/combined_data.parquet data/docs/knowledge_base.json
           if git diff --staged --quiet; then
-            echo "No changes to data — skipping commit"
+            echo "No changes — skipping commit"
           else
-            git commit -m "Auto-sync: refresh market data $(date +'%Y-%m-%d')"
+            git commit -m "Auto-sync: refresh data and knowledge base $(date +'%Y-%m-%d')"
             git push
           fi
