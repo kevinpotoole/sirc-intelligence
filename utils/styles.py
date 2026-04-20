@@ -10,13 +10,23 @@ html, body, [class*="css"] {
 /* ── Top header bar ── */
 .sirc-header {
     background: #002349;
-    padding: 1.2rem 2rem;
+    padding: 1rem 2rem;
     margin: -1rem -1rem 1.5rem -1rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
-.sirc-header h1 {
+.sirc-header-left {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+}
+.sirc-header-logo {
+    height: 42px;
+    width: auto;
+    display: block;
+}
+.sirc-header-text h1 {
     font-family: 'Playfair Display', serif;
     color: #C9A96E;
     font-size: 1.4rem;
@@ -24,7 +34,7 @@ html, body, [class*="css"] {
     margin: 0;
     letter-spacing: 0.04em;
 }
-.sirc-header span {
+.sirc-header-text span {
     color: #FFFFFF;
     font-size: 0.75rem;
     letter-spacing: 0.1em;
@@ -194,13 +204,52 @@ def apply_plotly_theme(fig, title=None):
     return fig
 
 
+def _logo_b64() -> str:
+    """Download the SIRC white logo from Drive and return as base64. Cached per session."""
+    import base64
+    import streamlit as st
+    import requests
+
+    LOGO_FILE_ID = "1Tb3_8VL4BbdH_CGbj79oUb05GctoAxy6"
+
+    @st.cache_data(show_spinner=False, ttl=86400)
+    def _fetch(file_id: str, api_key: str) -> str:
+        r = requests.get(
+            f"https://www.googleapis.com/drive/v3/files/{file_id}?alt=media&key={api_key}",
+            timeout=15,
+        )
+        if r.status_code == 200:
+            return base64.b64encode(r.content).decode()
+        return ""
+
+    try:
+        api_key = st.secrets.get("google_drive", {}).get("api_key", "")
+        if api_key:
+            return _fetch(LOGO_FILE_ID, api_key)
+    except Exception:
+        pass
+    return ""
+
+
 def header(page_title: str, subtitle: str = ""):
     import streamlit as st
     st.markdown(SIRC_CSS, unsafe_allow_html=True)
+
+    b64 = _logo_b64()
+    if b64:
+        logo_html = f'<img class="sirc-header-logo" src="data:image/png;base64,{b64}" alt="SIRC Logo">'
+    else:
+        logo_html = ""
+
     st.markdown(f"""
     <div class="sirc-header">
-        <h1>Sotheby's International Realty Canada</h1>
-        <span>{page_title}{(' — ' + subtitle) if subtitle else ''}</span>
+        <div class="sirc-header-left">
+            {logo_html}
+            <div class="sirc-header-text">
+                <h1>Sotheby's International Realty Canada</h1>
+                <span>{page_title}{(' — ' + subtitle) if subtitle else ''}</span>
+            </div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
