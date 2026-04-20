@@ -9,3 +9,4 @@ data/docs/*.pdf
 *.egg-info/
 dist/
 build/
+data/mb_report.xlsx
