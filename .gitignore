@@ -4,6 +4,7 @@ __pycache__/
 .streamlit/secrets.toml
 data/*.csv
 data/*.xlsx
+data/docs/*.pdf
 .DS_Store
 *.egg-info/
 dist/
