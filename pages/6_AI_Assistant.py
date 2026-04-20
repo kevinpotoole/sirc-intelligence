@@ -41,8 +41,15 @@ When answering from the provided excerpts:
 Always note: you provide information and guidance only — not legal advice. Recommend formal consultation for legal or regulatory matters."""
 
 
+def _kb_mtime() -> float:
+    try:
+        return os.path.getmtime(KNOWLEDGE_BASE_PATH)
+    except OSError:
+        return 0.0
+
+
 @st.cache_data(show_spinner=False)
-def load_knowledge_base():
+def load_knowledge_base(mtime: float):  # mtime busts cache when file changes
     if not os.path.exists(KNOWLEDGE_BASE_PATH):
         return []
     with open(KNOWLEDGE_BASE_PATH) as f:
@@ -123,7 +130,7 @@ except Exception:
     anthropic_key = None
 
 # ── Load knowledge base ────────────────────────────────────────────────────
-chunks = load_knowledge_base()
+chunks = load_knowledge_base(_kb_mtime())
 sources = sorted(set(c["source"] for c in chunks)) if chunks else []
 bcfsa_count = sum(1 for s in sources if s.startswith("BCFSA"))
 drive_count = len(sources) - bcfsa_count
