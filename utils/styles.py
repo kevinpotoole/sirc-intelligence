@@ -10,13 +10,23 @@ html, body, [class*="css"] {
 /* ── Top header bar ── */
 .sirc-header {
     background: #002349;
-    padding: 1.2rem 2rem;
+    padding: 1rem 2rem;
     margin: -1rem -1rem 1.5rem -1rem;
     display: flex;
     align-items: center;
     justify-content: space-between;
 }
-.sirc-header h1 {
+.sirc-header-left {
+    display: flex;
+    align-items: center;
+    gap: 1.2rem;
+}
+.sirc-header-logo {
+    height: 42px;
+    width: auto;
+    display: block;
+}
+.sirc-header-text h1 {
     font-family: 'Playfair Display', serif;
     color: #C9A96E;
     font-size: 1.4rem;
@@ -24,7 +34,7 @@ html, body, [class*="css"] {
     margin: 0;
     letter-spacing: 0.04em;
 }
-.sirc-header span {
+.sirc-header-text span {
     color: #FFFFFF;
     font-size: 0.75rem;
     letter-spacing: 0.1em;
@@ -194,21 +204,36 @@ def apply_plotly_theme(fig, title=None):
     return fig
 
 
+def _logo_b64() -> str:
+    """Read the bundled SIRC white logo and return as base64."""
+    import base64, os
+    logo_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets", "sirc_logo.png")
+    try:
+        with open(logo_path, "rb") as f:
+            return base64.b64encode(f.read()).decode()
+    except OSError:
+        return ""
+
+
 def header(page_title: str, subtitle: str = ""):
-    import os, streamlit as st
+    import streamlit as st
     st.markdown(SIRC_CSS, unsafe_allow_html=True)
 
-    # Logo in the sidebar navigation bar
-    assets = os.path.join(os.path.dirname(os.path.dirname(__file__)), "assets")
-    dark_logo = os.path.join(assets, "sirc_logo_dark.jpg")
-    light_logo = os.path.join(assets, "sirc_logo.png")
-    if os.path.exists(dark_logo):
-        st.logo(dark_logo, icon_image=light_logo if os.path.exists(light_logo) else dark_logo)
+    b64 = _logo_b64()
+    if b64:
+        logo_html = f'<img class="sirc-header-logo" src="data:image/png;base64,{b64}" alt="SIRC Logo">'
+    else:
+        logo_html = ""
 
     st.markdown(f"""
     <div class="sirc-header">
-        <h1>Sotheby's International Realty Canada</h1>
-        <span>{page_title}{(' — ' + subtitle) if subtitle else ''}</span>
+        <div class="sirc-header-left">
+            {logo_html}
+            <div class="sirc-header-text">
+                <h1>Sotheby's International Realty Canada</h1>
+                <span>{page_title}{(' — ' + subtitle) if subtitle else ''}</span>
+            </div>
+        </div>
     </div>
     """, unsafe_allow_html=True)
 
