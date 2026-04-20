@@ -78,6 +78,37 @@ BCFSA_FOLLOW_PATTERNS = [
     "/managing-broker",
 ]
 
+# ── CREA website sections to crawl ─────────────────────────────────────────
+CREA_BASE = "https://www.crea.ca"
+CREA_SEED_URLS = [
+    "/standards-programs/realtor-code/",
+    "/standards-programs/trademark-protection-competition/",
+    "/standards-programs/programs/",
+    "/standards-programs/reputation/learning-development/",
+    "/media-hub/publications/",
+    "/media-hub/news/",
+    "/media-hub/blogs/",
+    "/legal/",
+    "/advocacy/political-advocacy/",
+    "/housing-market-stats/canadian-housing-market-stats/",
+]
+
+# URL patterns to follow when crawling CREA
+CREA_FOLLOW_PATTERNS = [
+    "/standards-programs/",
+    "/media-hub/",
+    "/legal/",
+    "/advocacy/",
+    "/housing-market-stats/",
+    "/cafe/",
+]
+
+CREA_SKIP_PATTERNS = [
+    "/fr/", "/careers/", "/contact/", "/search/", "/privacy/",
+    "/technology/", "/realtor-ca-for-canadians/", "/hpi-tool/",
+    "/national-price-map/", "/podcast-guest-application/",
+]
+
 # ── Helpers ─────────────────────────────────────────────────────────────────
 
 def chunk_text(text: str, source: str, url: str = "") -> list[dict]:
@@ -131,6 +162,16 @@ def is_relevant_bcfsa_url(url: str) -> bool:
     if any(s in path for s in skip):
         return False
     return any(p in path for p in BCFSA_FOLLOW_PATTERNS)
+
+
+def is_relevant_crea_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if "crea.ca" not in parsed.netloc:
+        return False
+    path = parsed.path
+    if any(s in path for s in CREA_SKIP_PATTERNS):
+        return False
+    return any(p in path for p in CREA_FOLLOW_PATTERNS)
 
 
 # ── Google Drive section ────────────────────────────────────────────────────
@@ -266,6 +307,100 @@ def crawl_bcfsa() -> list[dict]:
     return chunks
 
 
+# ── CREA crawler ────────────────────────────────────────────────────────────
+
+def crawl_crea() -> list[dict]:
+    visited: set[str] = set()
+    to_visit: list[str] = [CREA_BASE + path for path in CREA_SEED_URLS]
+    chunks: list[dict] = []
+    pdf_urls: set[str] = set()
+
+    print(f"  Starting CREA crawl with {len(to_visit)} seed URLs")
+
+    while to_visit and len(visited) < 80:
+        url = to_visit.pop(0)
+        if url in visited:
+            continue
+        visited.add(url)
+        print(f"  → fetching ({len(visited)}/{len(to_visit)+len(visited)}): {url[:80]}")
+        time.sleep(0.5)
+
+        r = _fetch_url(url)
+        if r is None:
+            continue
+
+        if r.status_code != 200:
+            print(f"  ✗ HTTP {r.status_code}: {url}")
+            continue
+
+        content_type = r.headers.get("content-type", "")
+
+        if "pdf" in content_type:
+            try:
+                text = extract_pdf_text(r.content)
+                title = f"CREA Document: {url.split('/')[-1]}"
+                doc_chunks = chunk_text(text, title, url=url)
+                chunks.extend(doc_chunks)
+                print(f"  ✓ PDF {url.split('/')[-1]}: {len(doc_chunks)} chunks")
+            except Exception as e:
+                print(f"  ✗ PDF parse error {url}: {e}")
+            continue
+
+        if "html" not in content_type:
+            continue
+
+        try:
+            soup = BeautifulSoup(r.text, "lxml")
+            page_title_tag = soup.find("h1") or soup.find("title") or soup.find("h2")
+            page_title = page_title_tag.get_text(strip=True) if page_title_tag else url.split("/")[-1]
+            source_label = f"CREA: {page_title}"
+
+            text = extract_html_text(r.text)
+            word_count = len(text.split())
+            if word_count > 80:
+                doc_chunks = chunk_text(text, source_label, url=url)
+                chunks.extend(doc_chunks)
+                print(f"  ✓ {source_label[:65]}: {len(doc_chunks)} chunks ({word_count} words)")
+            else:
+                print(f"  – too short ({word_count} words): {source_label[:60]}")
+
+            for a in soup.find_all("a", href=True):
+                href = a["href"]
+                if not href or href.startswith("mailto:") or href.startswith("tel:"):
+                    continue
+                full_url = urljoin(url, href).split("?")[0].split("#")[0]
+                if full_url in visited or full_url in to_visit:
+                    continue
+                if full_url.endswith(".pdf"):
+                    pdf_urls.add(full_url)
+                elif is_relevant_crea_url(full_url):
+                    to_visit.append(full_url)
+
+        except Exception as e:
+            print(f"  ✗ parse error {url}: {e}")
+
+    # Download discovered PDFs
+    print(f"  Discovered {len(pdf_urls)} CREA PDF links")
+    for pdf_url in list(pdf_urls)[:15]:
+        if pdf_url in visited:
+            continue
+        visited.add(pdf_url)
+        time.sleep(0.5)
+        r = _fetch_url(pdf_url, timeout=30)
+        if r is None or r.status_code != 200:
+            continue
+        try:
+            text = extract_pdf_text(r.content)
+            title = f"CREA PDF: {pdf_url.split('/')[-1].replace('.pdf','').replace('-',' ').title()}"
+            doc_chunks = chunk_text(text, title, url=pdf_url)
+            chunks.extend(doc_chunks)
+            print(f"  ✓ {title}: {len(doc_chunks)} chunks")
+        except Exception as e:
+            print(f"  ✗ PDF parse error {pdf_url}: {e}")
+
+    return chunks
+
+
 # ── Main ────────────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -275,15 +410,20 @@ if __name__ == "__main__":
 
     all_chunks = []
 
-    print("\n[1/2] Processing Google Drive regulatory documents...")
+    print("\n[1/3] Processing Google Drive regulatory documents...")
     drive_chunks = process_drive_docs()
     all_chunks.extend(drive_chunks)
     print(f"      {len(drive_chunks)} chunks from Drive documents")
 
-    print("\n[2/2] Crawling BCFSA website...")
+    print("\n[2/3] Crawling BCFSA website...")
     bcfsa_chunks = crawl_bcfsa()
     all_chunks.extend(bcfsa_chunks)
     print(f"      {len(bcfsa_chunks)} chunks from BCFSA website")
+
+    print("\n[3/3] Crawling CREA website...")
+    crea_chunks = crawl_crea()
+    all_chunks.extend(crea_chunks)
+    print(f"      {len(crea_chunks)} chunks from CREA website")
 
     # Deduplicate by text content
     seen_texts = set()
