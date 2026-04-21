@@ -28,6 +28,27 @@ def download(file_id):
     return r.content
 
 
+def list_subfolders(folder_id):
+    folders, page_token = [], None
+    while True:
+        params = {
+            "q": f"'{folder_id}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false",
+            "fields": "nextPageToken,files(id,name)",
+            "key": API_KEY,
+            "pageSize": 100,
+        }
+        if page_token:
+            params["pageToken"] = page_token
+        r = requests.get("https://www.googleapis.com/drive/v3/files", params=params, timeout=30)
+        r.raise_for_status()
+        data = r.json()
+        folders.extend(data.get("files", []))
+        page_token = data.get("nextPageToken")
+        if not page_token:
+            break
+    return folders
+
+
 def list_csvs(folder_id):
     files, page_token = [], None
     while True:
@@ -46,6 +67,9 @@ def list_csvs(folder_id):
         page_token = data.get("nextPageToken")
         if not page_token:
             break
+    # Recurse into subfolders
+    for subfolder in list_subfolders(folder_id):
+        files.extend(list_csvs(subfolder["id"]))
     return files
 
 
