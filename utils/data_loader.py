@@ -73,7 +73,6 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
         "ML \\#": "mls_number",
         "Address": "address",
         "City": "city",
-        "S/A": "sub_area",
         "Prop Type": "prop_type",
         "Type": "property_type",
         "Orig Price": "orig_price",
@@ -90,6 +89,39 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
         "Buy Agt 1 - AgntFName": "buying_agent",
     }
     df = df.rename(columns={k: v for k, v in rename.items() if k in df.columns})
+
+    # Merge both sub-area columns — "Sub Area" is primary, "S/A" fills gaps
+    if "Sub Area" in df.columns or "S/A" in df.columns:
+        sub = df.get("Sub Area", pd.Series(dtype=str))
+        sa  = df.get("S/A",       pd.Series(dtype=str))
+        df["sub_area"] = sub.combine_first(sa)
+        df.drop(columns=[c for c in ["Sub Area", "S/A"] if c in df.columns], inplace=True)
+
+    # Expand abbreviated city names to full names
+    CITY_MAP = {
+        "WEST VANC":   "WEST VANCOUVER",
+        "NORTH VANC":  "NORTH VANCOUVER",
+        "MAPLERIDGE":  "MAPLE RIDGE",
+        "NEW WEST":    "NEW WESTMINSTER",
+        "PORT COQ":    "PORT COQUITLAM",
+        "PITT":        "PITT MEADOWS",
+        "TSAWW":       "TSAWWASSEN",
+        "HARRISONHS":  "HARRISON HOT SPRINGS",
+        "HARRISONMI":  "HARRISON MILLS",
+        "HALFMOON":    "HALFMOON BAY",
+        "PENDER HRB":  "PENDER HARBOUR",
+        "PENDER ISL":  "PENDER ISLAND",
+        "BRACKENDAL":  "BRACKENDALE",
+        "SUNSHINE V":  "SUNSHINE VALLEY",
+        "SALTSPRING":  "SALT SPRING ISLAND",
+        "SARDIS GRN":  "SARDIS GREEN",
+        "SARDIS CRV":  "SARDIS CURVE",
+        "NORTH BLAC":  "NORTH BLACKTOP",
+        "MTWOODSIDE":  "MT WOODSIDE",
+        "CADREB OTH":  "OTHER",
+    }
+    if "city" in df.columns:
+        df["city"] = df["city"].str.strip().str.upper().replace(CITY_MAP)
 
     for col in ["orig_price", "list_price", "sold_price"]:
         if col in df.columns:
