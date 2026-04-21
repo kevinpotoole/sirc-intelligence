@@ -167,6 +167,53 @@ html, body, [class*="css"] {
     color: #002349;
 }
 
+/* ── Mobile ── */
+@media (max-width: 768px) {
+    .sirc-header {
+        padding: 0.75rem 1rem;
+        margin: -1rem -1rem 1rem -1rem;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    .sirc-header-logo {
+        height: 30px;
+    }
+    .sirc-header-text h1 {
+        font-size: 1rem;
+        letter-spacing: 0.02em;
+    }
+    .sirc-header-text span {
+        font-size: 0.65rem;
+    }
+    /* Stack columns vertically */
+    [data-testid="column"] {
+        width: 100% !important;
+        flex: 1 1 100% !important;
+        min-width: 100% !important;
+    }
+    /* Compact metric cards */
+    [data-testid="metric-container"] {
+        padding: 0.6rem 0.75rem;
+    }
+    [data-testid="metric-container"] [data-testid="stMetricValue"] {
+        font-size: 1.2rem !important;
+    }
+    /* Full-width dataframes */
+    [data-testid="stDataFrame"] {
+        overflow-x: auto;
+        -webkit-overflow-scrolling: touch;
+    }
+    /* Tighten section headings */
+    .section-title {
+        font-size: 1rem;
+        margin: 1rem 0 0.75rem 0;
+    }
+    /* Buttons full width */
+    .stButton > button {
+        width: 100%;
+    }
+}
+
 /* ── Recruitment badge ── */
 .recruit-badge {
     background: #C9A96E;
