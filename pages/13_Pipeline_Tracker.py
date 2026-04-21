@@ -6,7 +6,6 @@ import streamlit as st
 from utils.data_loader import load_data
 from utils.styles import apply_plotly_theme, header, section, SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM
 
-st.set_page_config(page_title="Pipeline Tracker | SIRC", layout="wide")
 header("Pipeline Tracker", "Active → Pending → Closed Deal Flow")
 
 df = load_data()

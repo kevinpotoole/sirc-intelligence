@@ -6,7 +6,6 @@ import plotly.express as px
 from utils.data_loader import load_data
 from utils.styles import header, section, apply_plotly_theme, SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM
 
-st.set_page_config(page_title="Agent Performance | SIRC", layout="wide")
 header("Agent Performance", "Individual & Team Analysis")
 
 df = load_data()

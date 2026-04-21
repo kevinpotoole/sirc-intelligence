@@ -6,7 +6,6 @@ from datetime import date
 from utils.data_loader import load_data
 from utils.styles import header, section, SIRC_CSS, SIRC_NAVY, SIRC_GOLD
 
-st.set_page_config(page_title="Generate Report | SIRC", layout="wide")
 header("Generate Report", "Branded Exports for Ownership & Internal Use")
 
 df = load_data()

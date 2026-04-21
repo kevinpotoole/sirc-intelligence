@@ -9,7 +9,6 @@ from utils.styles import (
     SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM,
 )
 
-st.set_page_config(page_title="Agent Search | SIRC", layout="wide")
 header("Agent Search", "Full profile for any agent in the market")
 
 df = load_data()

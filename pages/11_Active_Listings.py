@@ -6,7 +6,6 @@ import streamlit as st
 from utils.data_loader import load_data
 from utils.styles import apply_plotly_theme, header, section, SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM
 
-st.set_page_config(page_title="Active Listings | SIRC", layout="wide")
 header("Active Listings", "Current Inventory Browser")
 
 df = load_data()

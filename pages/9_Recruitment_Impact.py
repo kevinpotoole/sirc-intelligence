@@ -16,7 +16,6 @@ from utils.styles import (
     SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM,
 )
 
-st.set_page_config(page_title="Recruitment Impact | SIRC", layout="wide")
 header("Recruitment Impact Analyser", "Project the P&L effect of recruiting a target agent")
 
 MB_REPORT_PATH = os.path.join(

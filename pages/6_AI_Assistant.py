@@ -8,7 +8,6 @@ import streamlit as st
 
 from utils.styles import header, section, SIRC_CSS, SIRC_NAVY, SIRC_GOLD
 
-st.set_page_config(page_title="AI Managing Broker Assistant | SIRC", layout="wide")
 header("AI Managing Broker Assistant", "Ask anything about regulations, policies & compliance")
 
 KNOWLEDGE_BASE_PATH = os.path.join(

@@ -6,7 +6,6 @@ import streamlit as st
 from utils.data_loader import load_data
 from utils.styles import apply_plotly_theme, header, section, SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM
 
-st.set_page_config(page_title="Market Absorption | SIRC", layout="wide")
 header("Market Absorption", "Months of Supply & Market Balance")
 
 df = load_data()

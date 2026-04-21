@@ -6,7 +6,6 @@ import plotly.express as px
 from utils.data_loader import load_data
 from utils.styles import header, section, apply_plotly_theme, SIRC_CSS, SIRC_NAVY, SIRC_GOLD
 
-st.set_page_config(page_title="Brokerage Intelligence | SIRC", layout="wide")
 header("Brokerage Intelligence", "SIRC vs. The Market")
 
 df = load_data()

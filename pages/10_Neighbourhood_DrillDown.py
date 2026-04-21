@@ -9,7 +9,6 @@ from utils.styles import (
     SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM,
 )
 
-st.set_page_config(page_title="Neighbourhood Drill-Down | SIRC", layout="wide")
 header("Neighbourhood Drill-Down", "City → Sub-Area Market Analysis")
 
 df = load_data()

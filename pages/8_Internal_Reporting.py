@@ -23,7 +23,6 @@ from utils.styles import (
     SIRC_CSS, SIRC_NAVY, SIRC_GOLD, SIRC_CREAM,
 )
 
-st.set_page_config(page_title="Internal Reporting | SIRC", layout="wide")
 header("Internal Reporting", "Managing Broker Dashboard — Vancouver & West Vancouver")
 
 MB_REPORT_PATH = os.path.join(
